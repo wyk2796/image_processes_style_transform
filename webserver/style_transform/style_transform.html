@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Style-Transform</title>
+    <style>
+
+        html, body {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+        }
+
+        #container {
+            width: 100%;
+            height: 100%;
+        }
+
+        #loadingPad {
+            position: fixed;
+            height: 100%;
+            width: 100%;
+            top: 0;
+            left: 0;
+            background-color: #031D32;
+            z-index: 2;
+        }
+
+        #loading {
+            position: fixed;
+            width: 30%;
+            top: 150px;
+            margin-left: 35%;
+        }
+
+    </style>
+</head>
+<body>
+<div id="container"></div>
+<div id="loadingPad">
+    <img id="loading" src="./assets/loading.gif">
+</div>
+
+<script src="../TensorSpace/tensorspace/dependencies/jquery.min.js"></script>
+<script src="../TensorSpace/tensorspace/dependencies/three.min.js"></script>
+<script src="../TensorSpace/tensorspace/dependencies/stats.min.js"></script>
+<script src="../TensorSpace/tensorspace/dependencies/tween.min.js"></script>
+<script src="../TensorSpace/tensorspace/dependencies/TrackballControls.js"></script>
+<script src="../TensorSpace/tensorspace/dependencies/tf.min.js"></script>
+<script src="../TensorSpace/tensorspace/tensorspace.js"></script>
+
+<script>
+    
+    function conv_bn_relu(x, nb_filter, kernelSize, stride) {
+        let conv = new TSP.layers.Conv2d({
+            kernelSize: kernelSize,
+            filters: nb_filter,
+            strides: stride,
+            padding: "same"
+        });
+        let active = new TSP.layers.Activation2d({
+            activation: "ReLU"
+        });
+        conv.apply(x);
+        active.apply(conv);
+        return active
+    }
+
+    function dconv_bn_nolinear(x, nb_filter, kernel_size, stride, active_name){
+        let upsampling = new TSP.layers.UpSampling2d({
+            size: [stride, stride]
+        });
+        let padding = new TSP.layers.Padding2d({
+            padding: [stride,stride]
+        });
+        let conv = new TSP.layers.Conv2d({
+            kernelSize: kernel_size,
+            filters: nb_filter,
+            strides: 1,
+            padding: "valid"
+        });
+        let active = new TSP.layers.Activation2d({
+            activation: active_name
+        });
+        upsampling.apply(x);
+        padding.apply(upsampling);
+        conv.apply(padding);
+        active.apply(conv);
+        res_conv(active)
+    }
+
+    function res_conv(x) {
+        let identity = new TSP.layers.Cropping2d({
+            cropping : [[2, 2], [1, 1]]
+        });
+        identity.apply(x);
+        let conv_1 = new TSP.layers.Conv2d({
+            kernelSize: 3,
+            filters: 128,
+            strides: 1,
+            padding: "valid"
+        });
+        conv_1.apply(x);
+        let active = new TSP.layers.Activation2d({
+            activation: "ReLU"
+        });
+        active.apply(conv_1);
+        let conv_2 = new TSP.layers.Conv2d({
+            kernelSize: 3,
+            filters: 128,
+            strides: 1,
+            padding: "valid"
+        });
+        conv_2.apply(active);
+        return new TSP.layers.Add([identity, conv_2], {
+        });
+    }
+
+    function constructTSPModel(width, high) {
+        let modelContainer = document.getElementById("container");
+
+        let layer_input = new TSP.layers.RGBInput({
+            shape: [width, high, 3],
+            name: "input_1"
+        });
+
+        let conv2d_1 = conv_bn_relu(layer_input, 32, 9, 1);
+        let conv2d_2 = conv_bn_relu(conv2d_1, 64, 9, 2);
+        let conv = conv_bn_relu(conv2d_2, 128, 3, 2);
+
+        for (let i = 0; i < 5; i++)
+            conv = res_conv(conv)
+
+        let d1 = dconv_bn_nolinear(conv, 64, 3, 2, "ReLU");
+        let d2 = dconv_bn_nolinear(d1, 32, 3, 2, "ReLU");
+        let d3 = dconv_bn_nolinear(d2, 3, 9, 1, "tanh");
+        let output = new TSP.layers.OutputDetection({
+            name: "output"
+        });
+
+        let model =  new TSP.models.Model(modelContainer, {
+            inputs: [layer_input],
+            outputs: [output],
+            layerShape: "rect",
+            layerInitStatus: "close",
+            stats: true
+        });
+
+        model.load({
+            type: "tfjs",
+            url: './model/des_glaneuses/model.json'
+        });
+        model.init();
+        return model;
+    }
+    console.log("before construct");
+    constructTSPModel(1000, 1000);
+    console.log("after construct")
+
+</script>
+</body>
+</html>

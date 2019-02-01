@@ -4,8 +4,9 @@ from tensorflow.python.keras.layers import Lambda
 
 
 def vgg_normalize(x):
-    x = x[:, :, :, ::-1]
-    return tf.add(x, -120)
+    Lambda(lambda t: t[:, :, :, ::-1])(x)
+    return Lambda(lambda t: t - 120)(x)
+
 
 
 def denormalize(x):

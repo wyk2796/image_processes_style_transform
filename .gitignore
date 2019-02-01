@@ -5,3 +5,4 @@ webserver/style_transform/model/
 webserver/vgg16/vgg16Model/
 pretrained/
 webserver/acgan/acganGenModel/
+la_muse.jpg_weights.h5

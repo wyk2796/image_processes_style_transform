@@ -16,13 +16,14 @@ def display_img(i, x, style, is_val=False):
     else:
         fname = P.output_dir + '/%s_%d.png' % (style, i)
     imsave(fname, img)
-    print('Image saved as', fname)
+    print('Image saved as %s \n' % fname)
 
 
 def train():
     style_name = 'la_muse.jpg'
     style_image = Image(P.style_dir + style_name)
     style_image.image_resize(P.width, P.high)
+    print('train')
     with tf.Session() as session:
         tf.keras.backend.set_session(session)
         model = StyleTransform(session, P.learning_rate, P.content_weight, P.style_weight)
@@ -41,15 +42,14 @@ def train():
                 if i % 1000 == 0:
                     print("skip to: %d" % i)
                 continue
-            print('start_train')
             hist = model.vgg_model.train_on_batch(x, dummy_y)
-            print('end_train')
+            print('\repoc: %d' % i, end='')
             if i % 50 == 0:
                 print(hist, (time.time() - t1))
                 t1 = time.time()
 
             if i % 500 == 0:
-                print("\repoc: ", i, end="")
+                print("\repoc: %d\n" % i, end='')
                 val_x = model.transform_model.predict(x)
 
                 display_img(i, x[0], style_name)

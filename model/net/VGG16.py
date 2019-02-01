@@ -9,8 +9,10 @@ class VGG16(object):
         self.model = None
 
     def create_network(self, input_tensor):
-        img_input = tf.keras.Input(tensor=input_tensor, shape=input_tensor.shape)
-
+        if input_tensor is None:
+            img_input = tf.keras.Input(tensor=input_tensor, shape=input_tensor.shape, name='vgg16_input')
+        else:
+            img_input = input_tensor
         # Block 1
         x = tf.keras.layers.Conv2D(64, (3, 3), activation='relu', padding='same', name='block1_conv1')(img_input)
         x = tf.keras.layers.Conv2D(64, (3, 3), activation='relu', padding='same', name='block1_conv2')(x)
@@ -38,7 +40,13 @@ class VGG16(object):
         x = tf.keras.layers.Conv2D(512, (3, 3), activation='relu', padding='same', name='block5_conv2')(x)
         x = tf.keras.layers.Conv2D(512, (3, 3), activation='relu', padding='same', name='block5_conv3')(x)
         x = tf.keras.layers.MaxPooling2D((2, 2), strides=(2, 2), name='block5_pool')(x)
-        self.model = tf.keras.Model(img_input, x, name='vgg16')
+
+        if input_tensor is not None:
+            inputs = tf.keras.utils.get_source_inputs(input_tensor)
+        else:
+            inputs = img_input
+
+        self.model = tf.keras.Model(inputs=inputs, outputs=x, name='vgg16')
 
     def load_existed_weight(self, weight_path):
         if weight_path is not None and self.model is not None:

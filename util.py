@@ -1,40 +1,46 @@
 # coding:utf-8
-from scipy.misc import imread, imresize
-import numpy as np
 import tensorflow as tf
+import tensorflowjs as tfjs
 
 
-def preprocess_image(image_path, img_width=256, img_height=256, load_dims=True, resize=True, size_multiple=4):
-    '''
-    Preprocess the image so that it can be used by Keras.
-    Args:
-        image_path: path to the image
-        img_width: image width after resizing. Optional: defaults to 256
-        img_height: image height after resizing. Optional: defaults to 256
-        load_dims: decides if original dimensions of image should be saved,
-                   Optional: defaults to False
-        vgg_normalize: decides if vgg normalization should be applied to image.
-                       Optional: defaults to False
-        resize: whether the image should be resided to new size. Optional: defaults to True
-        size_multiple: Deconvolution network needs precise input size so as to
-                       divide by 4 ("shallow" model) or 8 ("deep" model).
-    Returns: an image of shape (3, img_width, img_height) for dim_ordering = "th",
-             else an image of shape (img_width, img_height, 3) for dim ordering = "tf"
-    '''
-    img = imread(image_path, mode="RGB")  # Prevents crashes due to PNG images (ARGB)
-    if load_dims:
-        global img_WIDTH, img_HEIGHT, aspect_ratio
-        img_WIDTH = img.shape[0]
-        img_HEIGHT = img.shape[1]
-        aspect_ratio = img_HEIGHT / img_WIDTH
+out_put_layer = ['conv2d', 'conv2d_1', 'conv2d_2', 'conv2d_3', 'conv2d_4', 'conv2d_5',
+                 'conv2d_6', 'conv2d_7', 'conv2d_8', 'conv2d_9', 'conv2d_10',
+                 'conv2d_11', 'conv2d_12', 'conv2d_13', 'conv2d_14', 'conv2d_15',
+                 'cropping2d', 'cropping2d_1', 'cropping2d_2', 'cropping2d_3', 'cropping2d_4',
+                 'add', 'add_1', 'add_2', 'add_3', 'add_4',
+                 'block1_conv1', 'block1_conv2', 'block1_pool',
+                 'block2_conv1', 'block2_conv2', 'block2_pool',
+                 'block3_conv1', 'block3_conv2', 'block3_conv3', 'block3_pool',
+                 'block4_conv1', 'block4_conv2', 'block4_conv3', 'block4_pool',
+                 'block5_conv1', 'block5_conv2', 'block5_conv3', 'block5_pool']
 
-    if resize:
-        if img_width < 0 or img_height < 0: # We have already loaded image dims
-            img_width = (img_WIDTH // size_multiple) * size_multiple # Make sure width is a multiple of 4
-            img_height = (img_HEIGHT // size_multiple) * size_multiple # Make sure width is a multiple of 4
-        img = imresize(img, (img_width, img_height),interp='nearest')
 
-    img = img.astype(np.float32)
-    img = np.expand_dims(img, axis=0)
-    return img
+def generate_encapsulate_model_with_output_layer_names(model, output_layer_names):
+    enc_model = tf.keras.Model(
+        inputs=model.input,
+        outputs=list(map(lambda oln: model.get_layer(oln).output, output_layer_names))
+    )
+    return enc_model
+
+
+def generate_encapsulate_model_and_save(out_put_layer, model, path):
+    enc_model = generate_encapsulate_model_with_output_layer_names(model, out_put_layer)
+    tfjs.converters.save_keras_model(enc_model, path)
+
+
+def print_tensor_name():
+    for n in tf.get_default_graph().as_graph_def().node:
+        print(n.name)
+
+
+def load_tensor_name_from_file(path):
+    file = open(path, mode='r', encoding='utf-8')
+    tensor_names = []
+    for line in file.readlines():
+        tensor_names.append(line.strip())
+    return tensor_names
+
+
+def save_as_tfjs_model(model_path, output_node_name, output_dir):
+    tfjs.converters.convert_tf_saved_model(model_path, output_node_name, output_dir)
 

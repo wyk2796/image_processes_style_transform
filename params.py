@@ -1,11 +1,12 @@
 # coding:utf-8
 
-project_file_dir = "E:\\temp\\style_transform\\"
+project_file_dir = "E:\\data\\image\\style_transform\\"
 
 style_dir = project_file_dir + 'style\\'
 content_dir = project_file_dir + 'content\\'
-train_image_dir = 'E:\\temp\\train2017\\'
+train_image_dir = 'E:\\data\\image\\picture\\'
 output_dir = project_file_dir + 'output\\'
+saved_model_dir = project_file_dir + 'pretrained\\'
 
 batch_size = 1
 width = high = 256

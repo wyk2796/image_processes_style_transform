@@ -1,75 +1,77 @@
-# coding:utf-8
 import tensorflow as tf
-from model.layer.ImageCov import *
-from model.layer.Normalize import *
-from model.layer.Loss import TVRegularizer
-from tensorflow.python.keras.layers import Lambda
+
+WEIGHTS_INIT_STDEV = .1
 
 
-class ImageTransform(object):
+def transform_net(image):
+    with tf.name_scope(name='transform_net'):
+        conv1 = _conv_layer(image, 32, 9, 1, name='conv_layer_1')
+        conv2 = _conv_layer(conv1, 64, 3, 2, name='conv_layer_2')
+        conv3 = _conv_layer(conv2, 128, 3, 2, name='conv_layer_3')
+        resid1 = _residual_block('residual_block_1', conv3, 3)
+        resid2 = _residual_block('residual_block_2', resid1, 3)
+        resid3 = _residual_block('residual_block_3', resid2, 3)
+        resid4 = _residual_block('residual_block_4', resid3, 3)
+        resid5 = _residual_block('residual_block_5', resid4, 3)
+        conv_t1 = _conv_tranpose_layer(resid5, 64, 3, 2, name='conv_layer_t1')
+        conv_t2 = _conv_tranpose_layer(conv_t1, 32, 3, 2, name='conv_layer_t2')
+        conv_t3 = _conv_layer(conv_t2, 3, 9, 1, name='conv_layer_t3', relu=False)
+        preds = tf.nn.tanh(conv_t3) * 150 + 255./2
+    return preds
 
-    def __init__(self, image_width, image_height, tv_weight=1):
-        self.width = image_width
-        self.height = image_height
-        self.tv_weight = tv_weight
-        self.model = None
 
-    def create_network(self):
-        x = tf.keras.layers.Input(shape=[self.width, self.height, 3])
-        norm = Lambda(lambda t: t / 255)(x)
-        a = Lambda(reflect_padding, arguments={'pad': (40, 40)})(norm)
-        conv1 = self.conv_bn_relu(32, 9, 9, stride=(1, 1))(a)
-        conv2 = self.conv_bn_relu(64, 9, 9, stride=(2, 2))(conv1)
-        c = self.conv_bn_relu(128, 3, 3, stride=(2, 2))(conv2)
-        for i in range(5):
-            c = self.res_conv(128, 3, 3)(c)
-        dconv1 = self.dconv_bn_nolinear(64, 3, 3)(c)
-        dconv2 = self.dconv_bn_nolinear(32, 3, 3)(dconv1)
-        dconv3 = self.dconv_bn_nolinear(3, 9, 9, stride=(1, 1), activation="tanh")(dconv2)
-        y = Lambda(lambda t: (t + 1) * 127.5)(dconv3)
+def _conv_layer(net, num_filters, filter_size, strides, name, relu=True):
+    with tf.name_scope(name):
+        weights_init = _conv_init_vars(net, num_filters, filter_size)
+        strides_shape = [1, strides, strides, 1]
+        net = tf.nn.conv2d(net, weights_init, strides_shape, padding='SAME')
+        net = _instance_norm(net)
+        if relu:
+            net = tf.nn.relu(net)
 
-        self.model = tf.keras.Model(inputs=x, outputs=y)
+    return net
 
-        if self.tv_weight > 0:
-            self.add_total_variation_loss(self.model.layers[-1])
 
-    def get_model(self):
-        return self.model
+def _conv_tranpose_layer(net, num_filters, filter_size, strides, name):
+    with tf.name_scope(name):
+        weights_init = _conv_init_vars(net, num_filters, filter_size, transpose=True)
 
-    def conv_bn_relu(self, nb_filter, nb_row, nb_col, stride):
-        def conv_func(x):
-            x = tf.keras.layers.Conv2D(nb_filter, (nb_row, nb_col), strides=stride, padding='same')(x)
-            x = tf.keras.layers.BatchNormalization()(x)
-            x = tf.keras.layers.Activation("relu")(x)
-            return x
-        return conv_func
+        batch_size, rows, cols, in_channels = [i.value for i in net.get_shape()]
+        new_rows, new_cols = int(rows * strides), int(cols * strides)
+        # new_shape = #tf.pack([tf.shape(net)[0], new_rows, new_cols, num_filters])
 
-    def res_conv(self, nb_filter, nb_row, nb_col, stride=(1, 1)):
-        def _res_func(x):
-            identity = tf.keras.layers.Cropping2D(cropping=((2, 2), (2, 2)))(x)
-            a = tf.keras.layers.Conv2D(nb_filter, (nb_row, nb_col), strides=stride, padding='valid')(x)
-            a = tf.keras.layers.BatchNormalization()(a)
-            a = tf.keras.layers.Activation("relu")(a)
-            a = tf.keras.layers.Conv2D(nb_filter, (nb_row, nb_col), strides=stride, padding='valid')(a)
-            y = tf.keras.layers.BatchNormalization()(a)
-            return tf.keras.layers.add([identity, y])
-        return _res_func
+        new_shape = [batch_size, new_rows, new_cols, num_filters]
+        tf_shape = tf.stack(new_shape)
+        strides_shape = [1, strides, strides, 1]
 
-    def dconv_bn_nolinear(self, nb_filter, nb_row, nb_col, stride=(2, 2), activation="relu"):
-        def _dconv_bn(x):
-            #TODO: Deconvolution2D
-            #x = Deconvolution2D(nb_filter,nb_row, nb_col, output_shape=output_shape, subsample=stride, border_mode='same')(x)
-            #x = UpSampling2D(size=stride)(x)
-            x = Lambda(un_pooling2D, arguments={'size': stride})(x)
-            x = Lambda(reflect_padding, arguments={'pad': stride})(x)
-            x = tf.keras.layers.Conv2D(nb_filter, (nb_row, nb_col), padding='valid')(x)
-            x = tf.keras.layers.BatchNormalization()(x)
-            x = tf.keras.layers.Activation(activation)(x)
-            return x
-        return _dconv_bn
+        net = tf.nn.conv2d_transpose(net, weights_init, tf_shape, strides_shape, padding='SAME')
+        net = _instance_norm(net)
+        return tf.nn.relu(net)
 
-    def add_total_variation_loss(self, transform_output_layer):
-        # Total Variation Regularization
-        layer = transform_output_layer  # Output layer
-        tv_regularizer = TVRegularizer(self.tv_weight)(layer)
-        layer.add_loss(tv_regularizer)
+
+def _residual_block(name, net, filter_size=3):
+    with tf.name_scope(name):
+        tmp = _conv_layer(net, 128, filter_size, 1, name='{}_conv_layer_1'.format(name))
+        return net + _conv_layer(tmp, 128, filter_size, 1, relu=False, name='{}_conv_layer_2'.format(name))
+
+
+def _instance_norm(net):
+    batch, rows, cols, channels = [i.value for i in net.get_shape()]
+    var_shape = [channels]
+    mu, sigma_sq = tf.nn.moments(net, [1, 2], keep_dims=True)
+    shift = tf.Variable(tf.zeros(var_shape))
+    scale = tf.Variable(tf.ones(var_shape))
+    epsilon = 1e-3
+    normalized = (net - mu) / (sigma_sq + epsilon)**0.5
+    return scale * normalized + shift
+
+
+def _conv_init_vars(net, out_channels, filter_size, transpose=False):
+    _, rows, cols, in_channels = [i.value for i in net.get_shape()]
+    if not transpose:
+        weights_shape = [filter_size, filter_size, in_channels, out_channels]
+    else:
+        weights_shape = [filter_size, filter_size, out_channels, in_channels]
+
+    weights_init = tf.Variable(tf.truncated_normal(weights_shape, stddev=WEIGHTS_INIT_STDEV, seed=1), dtype=tf.float32)
+    return weights_init

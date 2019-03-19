@@ -1,75 +1,61 @@
-# coding:utf-8
-from model.style_transform import StyleTransform
-from preprocess_images.Image import Image
 import tensorflow as tf
-from scipy.misc import imsave
-import numpy as np
+from preprocess_images.Image import Image
+from model.style_transform import StyleTransform, get_style_feature
 import params as P
 import time
-import os
 import util
+import os
 
+style_name = 'starry_night'
+style_p = P.st_style_image_path_dict.get(style_name, 'resource/style/mirror.jpg')
+style_image = Image(style_p)
+style_image.image_resize(P.width, P.high)
+style_image.extend_dim()
+trains_files = util.get_files(P.st_train_path)
+model_saved_path = P.st_model_saved_dir + style_name + '/'
+writer = tf.summary.FileWriter(P.st_logs + style_name + "_{}".format(time.time()))
 
-def display_img(i, x, style, is_val=False):
-    # save current generated image
-    img = x
-    if is_val:
-        fname = P.output_dir + '/%s_%d_val.png' % (style, i)
+style_features = get_style_feature(style_image, '/gpu:0')
+
+with tf.Session() as session:
+    model = StyleTransform(style_features,
+                           P.st_batch_size,
+                           content_weight=P.st_content_weight,
+                           style_weight=P.st_style_weight,
+                           tv_weight=P.st_tv_weight)
+    model.create_network()
+    writer.add_graph(session.graph)
+    session.run(tf.global_variables_initializer())
+    saver = tf.train.Saver()
+    if os.path.exists(model_saved_path):
+        saver.restore(session, model_saved_path)
+        print('load saved weight from %s' % model_saved_path)
     else:
-        fname = P.output_dir + '/%s_%d.png' % (style, i)
-    imsave(fname, img)
-    print('Image saved as %s \n' % fname)
+        print('not exist the pretrained weights!')
+    loss = 0
+    for i in range(P.st_epoch):
+
+        image = Image(trains_files[i])
+        image.image_resize(P.width, P.high)
+        image.extend_dim()
+        result = model.train(session, image.image)
+        loss += result['loss']
+
+        if i % 50 == 0:
+            print("\repoch {} loss: {}".format(i, loss / 50), end='')
+            summary = result['summary']
+            writer.add_summary(summary, i)
+            writer.flush()
+            loss = 0
+
+        if i % 500 == 0:
+            pre = model.predict(session, image.image)
+            output_image = pre['output']
+            style_content = util.unprocess(output_image)
+            image.save_img(P.st_output_saved_dir + str(i) + '_raw.jpg')
+            image.set_image(style_content[0])
+            image.save_img(P.st_output_saved_dir + str(i) + '.jpg')
+            saver.save(session, model_saved_path)
 
 
-def train():
-    style_name = 'la_muse.jpg'
-    save_path = P.saved_model + style_name.split(sep='.')[0] + '\\'
-    style_image = Image(P.style_dir + style_name)
-    style_image.image_resize(P.width, P.high)
-    with tf.Session() as session:
-        tf.keras.backend.set_session(session)
-        model = StyleTransform(session, P.learning_rate, P.content_weight, P.style_weight)
-        model.create_model(P.width, P.high, style_image, P.tv_weight)
-        saver = tf.train.Saver()
-        if os.path.exists(save_path):
-            saver.restore(session, save_path)
-            # model.vgg_model.load_weights(save_path)
-            print('load saved weight from %s' % save_path)
-        dummy_y = np.zeros((P.batch_size, P.width, P.high, 3))
-        t1 = time.time()
-        data_gen = tf.keras.preprocessing.image.ImageDataGenerator()
-        i = 0
-        for x in data_gen.flow_from_directory(P.train_image_dir, class_mode=None, batch_size=P.batch_size,
-                                              target_size=(P.width, P.high), shuffle=False):
-            if i > P.n_epoch:
-                break
-            hist = model.vgg_model.train_on_batch(x, dummy_y)
-            print('\repoc: %d \n' % i, end='')
-            if i % 50 == 0:
-                print(hist, (time.time() - t1))
-                t1 = time.time()
-            if i % 500 == 0:
-                print("\repoc: %d\n" % i, end='')
-                val_x = model.transform_model.predict(x)
 
-                display_img(i, x[0], style_name)
-                display_img(i, val_x[0], style_name, True)
-                saver.save(session, save_path)
-                graph = tf.get_default_graph()
-                input = graph.get_tensor_by_name('input_1:0')
-                # Pick output for SavedModel
-                output = graph.get_tensor_by_name('lambda_8/mul:0')
-                tf.saved_model.simple_save(
-                    session, P.frozen_model_dir,
-                    {"input": input},
-                    {"output": output}
-                )
-                util.save_as_tfjs_model(P.frozen_model_dir, util.load_tensor_name_from_file(P.st_model_tensor_name_path),
-                                        P.tfjs_saved_dir + style_name.split(sep='.')[0] + '\\')
-                # model.vgg_model.save(save_path)
-                #util.generate_encapsulate_model_and_save(util.out_put_layer, model.vgg_model, save_path + '_js')
-            i += P.batch_size
-
-
-if __name__ == '__main__':
-    train()

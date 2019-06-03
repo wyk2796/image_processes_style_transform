@@ -7,7 +7,7 @@ import util
 from model.net.image_transform_net import transform_net
 import params as P
 
-STYLE_LAYERS = ('relu1_1', 'relu2_1', 'relu3_1', 'relu4_1', 'relu5_1')
+STYLE_LAYERS = ['relu1_1', 'relu2_1', 'relu3_1', 'relu4_1', 'relu5_1']
 CONTENT_LAYER = 'relu4_2'
 
 
@@ -34,12 +34,12 @@ class StyleTransform(object):
     def create_network(self):
         X_pre = util.preprocess(self.X_content)
         content_features = {}
-        content_net = VGG.net(P.st_vgg_path, X_pre, name='content_feature')
+        content_net = VGG.net(P.st_vgg_path, X_pre, layer_name='content_feature')
         content_features[CONTENT_LAYER] = content_net[CONTENT_LAYER]
         preds = transform_net(self.X_content/255.0)
         self.output = preds
         preds_pre = util.preprocess(preds)
-        net = VGG.net(P.st_vgg_path, preds_pre, 'after_transform_feature')
+        net = VGG.net(P.st_vgg_path, preds_pre, layer_name='transformed_feature')
         content_size = _tensor_size(content_features[CONTENT_LAYER]) * self.batch_size
         assert _tensor_size(content_features[CONTENT_LAYER]) == _tensor_size(net[CONTENT_LAYER])
 
@@ -52,7 +52,7 @@ class StyleTransform(object):
             style_losses = []
             for style_layer in STYLE_LAYERS:
                 layer = net[style_layer]
-                tf.summary.image(style_layer, util.unprocess(tf.transpose(layer, (3, 1, 2, 0))[0:10, :, :, :]), max_outputs=10)
+                # summary style layer
                 bs, height, width, filters = map(lambda i: i.value, layer.get_shape())
                 size = height * width * filters
                 feats = tf.reshape(layer, (bs, height * width, filters))
@@ -90,19 +90,26 @@ class StyleTransform(object):
         return session.run(self.output_fetch, feed)
 
 
-def get_style_feature(input_style_image, device='/cpu:0', writer=None):
+def get_style_feature(input_style_image, device, style_name):
+    # writer = tf.summary.FileWriter(P.st_logs + style_name + "_style_feature")
     with tf.Graph().as_default(), tf.device(device), tf.Session() as sess:
         style_image = tf.placeholder(dtype=tf.float32, shape=input_style_image.shape(), name='style_image')
         style_image_pre = util.preprocess(style_image)
-        net = VGG.net(P.st_vgg_path, style_image_pre, name='style_feature')
+        net = VGG.net(P.st_vgg_path, style_image_pre, layer_name='style_feature')
         style_features = dict()
+        style_layer = dict(filter(lambda x: x[0] in STYLE_LAYERS, net.items()))
+        merge = tf.summary.merge_all()
+        # style_layer['summary'] = merge
+        result = sess.run(style_layer, {style_image: input_style_image.image})
         for layer in STYLE_LAYERS:
-            features = net[layer].eval(feed_dict={style_image: input_style_image.image})
+            features = result[layer]
             features = np.reshape(features, (-1, features.shape[3]))
             gram = np.matmul(features.T, features) / features.size
             style_features[layer] = gram
-    if writer is not None:
-        writer.add_graph(sess.graph)
+    # writer.add_graph(sess.graph)
+    # writer.add_summary(result['summary'])
+    # writer.flush()
+    # writer.close()
     return style_features
 
 

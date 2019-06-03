@@ -225,55 +225,58 @@ class DoodleModel(object):
         # img_nrows, img_ncols = ref_img.shape[:2]
         # Create tensor variables for images
         images = K.concatenate([self.style_image, self.target_image, self.content_image], axis=0)
-
         # Create tensor variables for masks
         raw_style_mask, raw_target_mask = load_mask_labels(self.img_nrows, self.img_ncols)
         style_mask = K.variable(raw_style_mask.astype('float32'))
         target_mask = K.variable(raw_target_mask.astype('float32'))
         masks = K.concatenate([style_mask, target_mask], axis=0)
 
-
         # image model as VGG19
-        self.image_model = vgg19.VGG19(include_top=False, input_tensor=images)
+        with tf.name_scope("VGG"):
+            self.image_model = vgg19.VGG19(include_top=False, input_tensor=images)
 
         # mask model as a series of pooling
-        mask_input = tf.keras.layers.Input(tensor=masks, shape=(None, None, None), name='mask_input')
-        x = mask_input
-        for layer in self.image_model.layers[1:]:
-            name = 'mask_%s' % layer.name
-            if 'conv' in layer.name:
-                x = tf.keras.layers.AveragePooling2D((3, 3), padding='same', strides=(
-                    1, 1), name=name)(x)
-            elif 'pool' in layer.name:
-                x = tf.keras.layers.AveragePooling2D((2, 2), name=name)(x)
-        self.mask_model = tf.keras.Model(mask_input, x)
+        with tf.name_scope('mask_model'):
+            mask_input = tf.keras.layers.Input(tensor=masks, shape=(None, None, None), name='mask_input')
+            x = mask_input
+            for layer in self.image_model.layers[1:]:
+                name = 'mask_%s' % layer.name
+                if 'conv' in layer.name:
+                    x = tf.keras.layers.AveragePooling2D((3, 3), padding='same', strides=(
+                        1, 1), name=name)(x)
+                elif 'pool' in layer.name:
+                    x = tf.keras.layers.AveragePooling2D((2, 2), name=name)(x)
+            self.mask_model = tf.keras.Model(mask_input, x)
 
     def loss_function(self):
         image_features = {}
         mask_features = {}
-        for img_layer, mask_layer in zip(self.image_model.layers, self.mask_model.layers):
-            if 'conv' in img_layer.name:
-                assert 'mask_' + img_layer.name == mask_layer.name
-                layer_name = img_layer.name
-                img_feat, mask_feat = img_layer.output, mask_layer.output
-                tf.summary.image(mask_layer.name,
-                                 tf.reshape(mask_feat[1, :, :, 1] * 255, shape=(1, mask_feat.shape[1], mask_feat.shape[2], 1)))
-                tf.summary.image(img_layer.name,
-                                 tf.reshape(img_feat[0, :, :, 2] * 255, shape=(1, img_feat.shape[1], img_feat.shape[2], 1)))
-                image_features[layer_name] = img_feat
-                mask_features[layer_name] = mask_feat
+        with tf.name_scope('loss_network'):
+            for img_layer, mask_layer in zip(self.image_model.layers, self.mask_model.layers):
+                if 'conv' in img_layer.name:
+                    assert 'mask_' + img_layer.name == mask_layer.name
+                    layer_name = img_layer.name
+                    img_feat, mask_feat = img_layer.output, mask_layer.output
+                    tf.summary.image(mask_layer.name, mask_feat[1:2, :, :, 0:3])
+                    tf.summary.image(img_feat.name, img_feat[0:1, :, :, 0:3])
+                    # tf.summary.image(mask_layer.name,
+                    #                  tf.reshape(mask_feat[1, :, :, 0:3] * 255, shape=(1, mask_feat.shape[1], mask_feat.shape[2], 1)))
+                    # tf.summary.image(img_layer.name,
+                    #                  tf.reshape(img_feat[0, :, :, 0:3] * 255, shape=(1, img_feat.shape[1], img_feat.shape[2], 1)))
+                    image_features[layer_name] = img_feat
+                    mask_features[layer_name] = mask_feat
 
-        # Overall loss is the weighted sum of content_loss, style_loss and tv_loss
-        # Each individual loss uses features from image/mask models.
-        content_loss_value = None
-        for layer in self.content_feature_layers:
-            content_feat = image_features[layer][P.CONTENT, :, :, :]
-            target_feat = image_features[layer][P.TARGET, :, :, :]
-            content_l = P.doodle_content_weight * content_loss(content_feat, target_feat)
-            if content_loss_value is None:
-                content_loss_value = content_l
-            else:
-                content_loss_value = content_loss_value + content_l
+            # Overall loss is the weighted sum of content_loss, style_loss and tv_loss
+            # Each individual loss uses features from image/mask models.
+            content_loss_value = None
+            for layer in self.content_feature_layers:
+                content_feat = image_features[layer][P.CONTENT, :, :, :]
+                target_feat = image_features[layer][P.TARGET, :, :, :]
+                content_l = P.doodle_content_weight * content_loss(content_feat, target_feat)
+                if content_loss_value is None:
+                    content_loss_value = content_l
+                else:
+                    content_loss_value = content_loss_value + content_l
 
         tf.summary.scalar("content_loss", content_loss_value)
 

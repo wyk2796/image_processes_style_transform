@@ -3,9 +3,9 @@ from model.doodle import DoodleModel
 import os, time
 import params as P
 
-
+style_name = "Monet"
 with tf.Session() as session:
-    log_dir = P.doodle_logs + "/Monet{}".format(time.time())
+    log_dir = P.doodle_logs + "/{}_{}".format(style_name, time.time())
     model = DoodleModel(session)
     model.create_network()
     model.loss_function()

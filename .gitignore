@@ -8,3 +8,5 @@ webserver/acgan/acganGenModel/
 la_muse.jpg_weights.h5
 resource/output/
 resource/logs/
+resource/doodle/out/
+resource/image_transform/output/
